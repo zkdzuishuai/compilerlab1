@@ -40,6 +40,7 @@ class Scope {
 
         // Name not found: handled here?
         // assert(false && "Name not found in scope");
+        // 这里取消断言防止报错
         std::cerr << "Error: name '" << name << "' not found in scope." << std::endl;
 
         return nullptr;
@@ -107,9 +108,9 @@ class CminusfBuilder : public ASTVisitor {
     Scope scope;
     std::unique_ptr<Module> module;
 
-    int idx_count = 0;
-    int if_count    = 0; // 新增，用于 if 语句
-    int while_count = 0; // 新增，用于 while 语句
+    int idx_count = 0; // 新增变量用于idx计数，防止重复
+    int if_count    = 0; // 新增变量，用于 if 语句
+    int while_count = 0; // 新增变量，用于 while 语句
 
     struct {
         // whether require lvalue

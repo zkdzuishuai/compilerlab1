@@ -5,6 +5,7 @@
 #define CONST_INT(num) ConstantInt::get(num, module.get())
 
 // types
+// 头文件需要加入GlobalValue否则会对赋值语句报错
 Type *VOID_T;
 Type *INT1_T;
 Type *INT32_T;
@@ -76,21 +77,21 @@ if (node.num) {
         auto *array_type = ArrayType::get(elem_type, array_size);
 
         if (scope.in_global()) {
-            // 全局数组：用 ConstantZero 初始化
+            // 全局数组：需要用ConstantZero初始化
             auto *init_arr = ConstantZero::get(array_type, module.get());
             var_val = GlobalVariable::create(node.id, module.get(), array_type, false, init_arr);
         } else {
-            // 局部数组：在栈上分配
+            // 局部数组：在栈上用create_alloca分配
             var_val = builder->create_alloca(array_type);
         }
     } else {
         // 标量声明
         if (scope.in_global()) {
-            // 全局标量：用 ConstantZero 初始化，避免 init_val_ 为 nullptr
+            // 全局标量：用ConstantZero初始化，避免init_val_ 为 nullptr
             auto *init_val = ConstantZero::get(elem_type, module.get());
             var_val = GlobalVariable::create(node.id, module.get(), elem_type, false, init_val);
         } else {
-            // 局部标量：在栈上分配并初始化为 0
+            // 局部标量：在栈上分配并初始化为0
             var_val = builder->create_alloca(elem_type);
             if (elem_type == INT32_T)
                 builder->create_store(CONST_INT(0), var_val);
@@ -155,7 +156,7 @@ Value* CminusfBuilder::visit(ASTFunDeclaration &node) {
         scope.push(args[i]->get_name(), param_i);
     }
     node.compound_stmt->accept(*this);
-    auto *bb = builder->get_insert_block();
+    auto *bb = builder->get_insert_block();//后续这里出现了块终止问题，块未结束时似乎是禁止调用get_terminator的因此做出更改
 if (bb && !bb->is_terminated()) {
     if (ret_type == VOID_T)       builder->create_void_ret();
     else if (ret_type == INT32_T) builder->create_ret(CONST_INT(0));
@@ -166,6 +167,7 @@ if (bb && !bb->is_terminated()) {
 }
 
 Value* CminusfBuilder::visit(ASTParam &node) {
+    // 这里做修改去判断数组问题
     Type *param_type = nullptr;
 if (node.type == TYPE_INT) {
     param_type = node.isarray ? INT32PTR_T : INT32_T;
@@ -205,7 +207,7 @@ Value* CminusfBuilder::visit(ASTExpressionStmt &node) {
 }
 
 Value* CminusfBuilder::visit(ASTSelectionStmt &node) {
-    // 1) 条件 -> i1
+    // 1) 条件->i1
     Value *cond = node.expression->accept(*this);
     if (cond->get_type() == INT32_T)       cond = builder->create_icmp_ne(cond, CONST_INT(0));
     else if (cond->get_type() == FLOAT_T)  cond = builder->create_fcmp_ne(cond, CONST_FP(0.0f));
@@ -241,7 +243,7 @@ Value* CminusfBuilder::visit(ASTSelectionStmt &node) {
         }
     }
 
-    // 3) else 分支（如果有）
+    // 3) else 分支（如果有的话执行）
     if (node.else_statement) {
         builder->set_insert_point(elseBB);
         node.else_statement->accept(*this);  // 递归处理 else 分支
@@ -304,6 +306,7 @@ Value* CminusfBuilder::visit(ASTIterationStmt &node) {
 }
 
 Value* CminusfBuilder::visit(ASTReturnStmt &node) {
+    // 修改解决assign_cmp报错
     if (node.expression == nullptr) {
         builder->create_void_ret();
     } else {
@@ -423,7 +426,7 @@ Value* CminusfBuilder::visit(ASTVar &node) {
 }
 
 Value* CminusfBuilder::visit(ASTAssignExpression &node) {
-    // 重新更改，否则用例过不去，计算右值
+    // 重新更改，否则assign_cmp用例过不去，计算右值
     Value *expr_result = node.expression->accept(*this);
     // 获取左值地址
     context.require_lvalue = true;
@@ -498,7 +501,7 @@ Value* CminusfBuilder::visit(ASTSimpleExpression &node) {
     if (rhs->get_type() == INT1_T) {
         rhs = builder->create_zext(rhs, INT32_T);
     }
-    // （防御）如果意外混入了 float，这里也强制转成 i32 再比较
+    // （防御措施）如果意外混入了 float，这里也强制转成 i32 再比较
     if (lhs->get_type()->is_float_type()) {
         lhs = builder->create_fptosi(lhs, INT32_T);
     }
